@@ -57,7 +57,8 @@ module Y
 
         # State as JSON string (empty string = client removed)
         state_json = state ? state.to_json : ""
-        Y::Lib0::Encoding.write_var_string(encoder, state_json)
+        state_bytes = state_json.encode("UTF-8").bytes
+        Y::Lib0::Encoding.write_var_uint8_array(encoder, state_bytes)
 
         Y::Lib0::Encoding.to_uint8_array(encoder)
       end

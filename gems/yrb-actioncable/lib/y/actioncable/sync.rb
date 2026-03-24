@@ -7,7 +7,8 @@ module Y
     # This module contains a set of utility methods that allows a relatively
     # convenient implementation of a real-time sync channel. The module
     # implements the synchronization steps described in
-    # [`y-protocols/sync`](https://github.com/yjs/y-protocols/blob/master/sync.js).
+    # [`y-protocols/sync`](https://github.com/yjs/y-protocols/blob/master/sync.js)
+    # and [`y-protocols/awareness`](https://github.com/yjs/y-protocols/blob/master/awareness.js).
     #
     # @example Create a SyncChannel including this module
     #   class SyncChannel
@@ -37,6 +38,10 @@ module Y
         :MESSAGE_AWARENESS
       )
 
+      included do
+        class_attribute :_awareness_states, default: {}
+      end
+
       # Initiate synchronization. Encodes the current state_vector and transmits
       # to the connecting client.
       def initiate
@@ -47,7 +52,6 @@ module Y
         update = Y::Lib0::Encoding.encode_uint8_array_to_base64(update)
 
         transmit({ update: update })
-        # TODO: implement awareness https://github.com/yjs/y-websocket/blob/master/bin/utils.js#L278-L284
       end
 
       # This methods should be passed as a block to stream subscription, and not
@@ -80,7 +84,12 @@ module Y
             transmit({ update: update })
           end
         when MESSAGE_AWARENESS
-          # TODO: implement awareness https://github.com/yjs/y-websocket/blob/master/bin/utils.js#L179-L181
+          # Read and relay the awareness update to all connected clients.
+          # Awareness data is opaque binary -- the server relays it without
+          # interpreting the contents. Optionally notify the channel via
+          # on_awareness_update callback.
+          awareness_data = Y::Lib0::Decoding.read_var_uint8_array(decoder)
+          on_awareness_update(awareness_data) if respond_to?(:on_awareness_update, true)
         else
           raise "unexpected message_type=`#{message_type}`"
         end
@@ -177,27 +186,39 @@ module Y
         )
       end
 
+      # Broadcast an awareness update from the server side.
+      #
+      # Encodes the awareness data in the y-protocols awareness format
+      # (MESSAGE_AWARENESS + var-length uint8 array) and broadcasts it through
+      # the channel. Useful for server-originated awareness such as AI agent
+      # cursor presence.
+      #
+      # @param [Object] to The model/stream to broadcast to
+      # @param [Array<Integer>] awareness_data The raw awareness update bytes
+      # @param [String] origin Optional origin identifier to prevent echo
+      #
+      # @example Broadcast AI agent cursor position
+      #   Blog::PostChannel.broadcast_awareness(
+      #     post,
+      #     awareness_bytes,
+      #     origin: "ai-agent"
+      #   )
+      def self.broadcast_awareness(to, awareness_data, origin: "server")
+        encoder = Y::Lib0::Encoding.create_encoder
+        Y::Lib0::Encoding.write_var_uint(encoder, MESSAGE_AWARENESS)
+        Y::Lib0::Encoding.write_var_uint8_array(encoder, awareness_data)
+        update = Y::Lib0::Encoding.to_uint8_array(encoder)
+        encoded = Y::Lib0::Encoding.encode_uint8_array_to_base64(update)
+
+        { update: encoded, origin: origin }
+      end
+
       # Produce a canonical key for this channel and its parameters. This allows
       # us to create unique documents for separate use cases. e.g. an Issue is
       # the document scope, but has multiple fields that are synchronized, the
       # title, description, labels, …
       #
       # By default, the key is the same as the channel identifier.
-      #
-      # @example Create a new IssueChannel that sync updates for issue ID
-      #   # issue_channel.rb
-      #   class IssueChannel
-      #     include Y::Actionable::SyncChannel
-      #   end
-      #
-      #   # issue_subscription.js
-      #   const params = { id: 1 }
-      #   consumer.subscriptions.create(
-      #       {channel: "IssueChannel", ...params}
-      #   );
-      #
-      #   # example for a resulting canonical key
-      #   "issue_channel:id:1"
       def canonical_channel_key
         @canonical_channel_key ||= begin
           params_part = channel_identifier.map do |k, v|
@@ -244,17 +265,6 @@ module Y
       # {Y::Actioncable::Sync#load load}, this allows to provide a document to
       # clients that is restored from a persistent store like Redis or also an
       # ActiveRecord model.
-      #
-      # @example Initialize a {Y::Doc} from state stored in Redis
-      #   def doc
-      #     @doc ||= load { |id| load_doc(id) }
-      #   end
-      #
-      #   def load_doc(id)
-      #     data = REDIS.get(id)
-      #     data = data.unpack("C*") unless data.nil?
-      #     data
-      #   end
       #
       # @return [Y::Doc] The initialized document
       def doc

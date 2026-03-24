@@ -3,6 +3,7 @@
 require "y/actioncable/config"
 require "y/actioncable/engine"
 require "y/actioncable/reliable"
+require "y/actioncable/awareness"
 require "y/actioncable/sync"
 require "y/actioncable/version"
 

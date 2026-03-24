@@ -56,7 +56,7 @@ module Y
         Y::Lib0::Encoding.write_var_uint(encoder, clock)
 
         # State as JSON string (empty string = client removed)
-        state_json = state ? state.to_json : ""
+        state_json = state ? state.to_json : "null"
         state_bytes = state_json.encode("UTF-8").bytes
         Y::Lib0::Encoding.write_var_uint8_array(encoder, state_bytes)
 
